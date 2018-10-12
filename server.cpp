@@ -11,6 +11,8 @@
 #include "net.h"
 #include "charStream.h"
 #include "needham-schroeder.h"
+#include "diffie-hellman.h"
+#include "util.h"
 
 #define KDC_PORT 12345
 
@@ -29,9 +31,13 @@ int main(int argc, const char **argv) {
 		return EXIT_FAILURE;
 	}
 
-	autoclose_sock server_sock_closer{server_sock};
+	on_scope_exit server_sock_closer{[server_sock]() {
+		close(server_sock);
+	}};
 
-	srand(time(NULL));
+	dh_key server_key{};
+	server_key.x = static_cast<uint16_t>(rand_u64() % global_dh.q);
+	server_key.y = exp_mod_16(global_dh.alpha, server_key.x, global_dh.q);
 
 	std::vector<client> clients;
 
@@ -48,7 +54,7 @@ int main(int argc, const char **argv) {
 			}
 		}
 
-		if (select(max_fd + 1, &fds, NULL, NULL, NULL) < 0) {
+		if (select(max_fd + 1, &fds, nullptr, nullptr, nullptr) < 0) {
 			perror("select");
 			if (errno == EINTR) {
 				continue;
@@ -64,6 +70,17 @@ int main(int argc, const char **argv) {
 			c.sock = accept(server_sock, (sockaddr *)&c.addr, &len);
 			if (c.sock < 0) {
 				perror("accept");
+				if (errno == EINTR) {
+					continue;
+				} else {
+					break;
+				}
+			}
+
+			CharStream str;
+			str.push<U8>(0);
+			str.push<U16>(server_key.y);
+			if (send_stream(c.sock, str) < 0) {
 				if (errno == EINTR) {
 					continue;
 				} else {
@@ -103,10 +120,14 @@ int main(int argc, const char **argv) {
 					//Copy the correct listening port for this client
 					sockaddr_in addr = cs.pop<ID>();
 					client_a.addr.sin_port = addr.sin_port;
-					//Register key
-					client_a.key = cs.pop<10>();
-					printf("Client %s:%d registers\n", inet_ntoa(client_a.addr.sin_addr),
-					       ntohs(client_a.addr.sin_port));
+
+					//Generate and register session key
+					uint16_t pub_key = cs.pop<U16>();
+					uint16_t session_key = exp_mod_16(pub_key, server_key.x, global_dh.q);
+					client_a.key = std::bitset<10>{static_cast<uint64_t>(session_key)};
+
+					printf("Client %s:%d registers with pubkey %d\n", inet_ntoa(client_a.addr.sin_addr),
+					       ntohs(client_a.addr.sin_port), static_cast<int>(pub_key));
 				} else if (cmd == 1) {
 					NS1 ns1 = cs.pop<NS1>();
 
@@ -123,7 +144,7 @@ int main(int argc, const char **argv) {
 							NS2 ns2;
 							ns2.nonce_1 = ns1.nonce_1;
 							ns2.id_b = ns1.id_b;
-							ns2.session_key = std::bitset<10>(rand());
+							ns2.session_key = std::bitset<10>(rand_u64());
 
 							NS3 ns3;
 							ns3.session_key = ns2.session_key;

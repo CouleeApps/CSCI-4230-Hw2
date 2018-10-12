@@ -11,19 +11,6 @@
 #include <stdio.h>
 #include "charStream.h"
 
-struct autoclose_sock {
-	int sock;
-
-	explicit autoclose_sock(int sock) : sock(sock) {}
-	~autoclose_sock() {
-		close(sock);
-	}
-
-	operator int() const {
-		return sock;
-	}
-};
-
 int get_server_sock(int bind_addr, short bind_port, int &sock, sockaddr_in &addr) {
 	socklen_t len = sizeof(sockaddr_in);
 

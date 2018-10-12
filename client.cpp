@@ -8,7 +8,9 @@
 #include <unistd.h>
 #include <errno.h>
 #include "needham-schroeder.h"
+#include "diffie-hellman.h"
 #include "net.h"
+#include "util.h"
 
 #define KDC_ADDR "127.0.0.1"
 #define KDC_PORT 12345
@@ -23,31 +25,58 @@ int main(int argc, const char **argv) {
 		return EXIT_FAILURE;
 	}
 
-	autoclose_sock server_sock_closer{server_sock};
+	on_scope_exit server_sock_closer{[server_sock]() {
+		close(server_sock);
+	}};
 
-	srand(time(NULL));
-	std::bitset<10> key{static_cast<U64>(rand())};
+	std::bitset<10> key;
 
 	//Send that off to the key server
 	int client_sock;
-	sockaddr_in client_addr;
+	sockaddr_in client_addr{};
 	if (get_client_sock(KDC_ADDR, KDC_PORT, client_sock, client_addr) < 0) {
 		return EXIT_FAILURE;
 	}
 
-	autoclose_sock client_sock_closer{client_sock};
+	on_scope_exit client_sock_closer{[client_sock]() {
+		close(client_sock);
+	}};
 
 	//Register ourselves immediately
+	dh_key server_key{};
+	dh_key client_key{};
 	{
-		//TODO: Diffie-Hellman
+		CharStream resp;
+		if (recv_stream(client_sock, resp) < 0) {
+			return EXIT_FAILURE;
+		}
+		if (resp.pop<U8>() != 0) {
+			printf("Unknown DH command\n");
+			return EXIT_FAILURE;
+		}
+		//Get server's key
+		server_key.y = resp.pop<U16>();
+	}
+	//Generate own dh key
+	client_key.x = static_cast<uint16_t>(rand_u64() % global_dh.q);
+	client_key.y = exp_mod_16(global_dh.alpha, client_key.x, global_dh.q);
+
+	//k_AB = yA ^ xB mod q
+	uint16_t k_AB = exp_mod_16(server_key.y, client_key.x, global_dh.q);
+	key = std::bitset<10>{static_cast<uint64_t>(k_AB)};
+
+	//Tell server our key
+	{
 		CharStream str;
 		str.push<U8>(0); //Register
 		str.push<ID>(server_addr);
-		str.push<10>(key);
+		str.push<U16>(client_key.y);
 		if (send_stream(client_sock, str) < 0) {
 			return EXIT_FAILURE;
 		}
 	}
+
+	printf("Registered with KDC, their pubkey %d our pubkey %d\n", static_cast<int>(server_key.y), static_cast<int>(client_key.y));
 
 	while (true) {
 		fd_set fds;
@@ -57,7 +86,7 @@ int main(int argc, const char **argv) {
 		int max_fd = std::max(fileno(stdin), server_sock);
 
 		//Being fun and writing only one client... either reads from stdin or from the socket
-		if (select(max_fd + 1, &fds, NULL, NULL, NULL) < 0) {
+		if (select(max_fd + 1, &fds, nullptr, nullptr, nullptr) < 0) {
 			perror("select");
 			if (errno == EINTR) {
 				continue;
@@ -105,7 +134,7 @@ int ns_starter(sockaddr_in server_addr, int client_sock, std::bitset<10> key) {
 	ns1.id_a = server_addr;
 	inet_pton(AF_INET, addr, &ns1.id_b.sin_addr);
 	ns1.id_b.sin_port = htons(port);
-	ns1.nonce_1 = static_cast<uint8_t>(rand());
+	ns1.nonce_1 = static_cast<uint8_t>(rand_u64());
 
 	{
 		CharStream str;
@@ -135,18 +164,20 @@ int ns_starter(sockaddr_in server_addr, int client_sock, std::bitset<10> key) {
 	}
 
 	std::bitset<10> session_key = ns2.session_key;
-	printf("Got session key: %d\n", session_key.to_ullong());
+	printf("Got session key: %d\n", static_cast<int>(session_key.to_ullong()));
 
 	//Now we gotta talk to b
 	int b_sock;
-	sockaddr_in b_addr;
+	sockaddr_in b_addr{};
 	if (get_client_sock(inet_ntoa(ns2.id_b.sin_addr), ntohs(ns2.id_b.sin_port),
 	                    b_sock, b_addr) < 0) {
 		return -1;
 	}
 
 	//To cleanup the b socket when we're done with it
-	autoclose_sock b_sock_closer{b_sock};
+	on_scope_exit b_sock_closer{[b_sock]() {
+		close(b_sock);
+	}};
 
 	{
 		CharStream str;
@@ -173,7 +204,7 @@ int ns_starter(sockaddr_in server_addr, int client_sock, std::bitset<10> key) {
 
 	printf("Established connection, got NS4 nonce: %d\n", ns4.nonce_2);
 
-	NS5 ns5;
+	NS5 ns5{};
 	ns5.f_nonce_2 = nonce_2_fn(ns4.nonce_2);
 
 	encrypt_buf encrypt_ns5 = encrypt<NS5>(ns5, session_key);
@@ -193,7 +224,7 @@ int ns_starter(sockaddr_in server_addr, int client_sock, std::bitset<10> key) {
 
 int ns_receiver(int server_sock, std::bitset<10> key) {
 	socklen_t len = sizeof(sockaddr_in);
-	sockaddr_in a_addr;
+	sockaddr_in a_addr{};
 	int a_sock = accept(server_sock, (sockaddr *)&a_addr, &len);
 	if (a_sock < 0) {
 		perror("accept");
@@ -201,7 +232,9 @@ int ns_receiver(int server_sock, std::bitset<10> key) {
 	}
 
 	//To clean up the socket when we're done with it
-	autoclose_sock a_sock_closer{a_sock};
+	on_scope_exit a_sock_closer{[a_sock]() {
+		close(a_sock);
+	}};
 
 	CharStream str;
 	if (recv_stream(a_sock, str) < 0) {
@@ -218,11 +251,11 @@ int ns_receiver(int server_sock, std::bitset<10> key) {
 	NS3 ns3 = decrypt<NS3>(encrypt_ns3, key);
 	std::bitset<10> session_key = ns3.session_key;
 
-	printf("Got session key: %d\n", session_key.to_ullong());
+	printf("Got session key: %d\n", static_cast<int>(session_key.to_ullong()));
 
 	//Better send an NS4
-	NS4 ns4;
-	ns4.nonce_2 = rand();
+	NS4 ns4{};
+	ns4.nonce_2 = static_cast<uint8_t>(rand_u64());
 	printf("Send NS4 nonce: %d\n", ns4.nonce_2);
 	encrypt_buf encrypt_ns4 = encrypt<NS4>(ns4, session_key);
 
