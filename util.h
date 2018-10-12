@@ -7,6 +7,7 @@
 
 #include <functional>
 #include <random>
+#include <sys/time.h>
 
 struct on_scope_exit {
 	typedef std::function<void()> exit_fn;
@@ -23,6 +24,16 @@ uint64_t rand_u64() {
 	std::random_device rd;
 	std::mt19937_64 generator{rd()};
 	return distribution(generator);
+}
+
+uint64_t current_timestamp() {
+	return static_cast<uint64_t>(time(nullptr));
+}
+
+bool is_valid_timestamp(uint64_t timestamp) {
+	//10 seconds is the valid window
+	time_t current = time(nullptr);
+	return current < timestamp + 10;
 }
 
 #endif //CRYPTO2_UTIL_H

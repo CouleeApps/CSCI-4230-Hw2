@@ -185,6 +185,56 @@ inline S32 CharStream::pop() {
 }
 
 //-----------------------------------------------------------------------------
+// U64 datatype
+//-----------------------------------------------------------------------------
+
+template<>
+inline U64 CharStream::push(const U64 &value) {
+	//Neat little trick to convert U64 to U8
+	union {
+		U64 u64;
+		U8 u8[8];
+	} data;
+	data.u64 = value;
+
+	push<U8>(data.u8[0]);
+	push<U8>(data.u8[1]);
+	push<U8>(data.u8[2]);
+	push<U8>(data.u8[3]);
+	push<U8>(data.u8[4]);
+	push<U8>(data.u8[5]);
+	push<U8>(data.u8[6]);
+	push<U8>(data.u8[7]);
+	return value;
+}
+
+template<>
+inline U64 CharStream::pop() {
+	union {
+		U64 u64;
+		U8 u8[8];
+	} data;
+	data.u8[0] = pop<U8>();
+	data.u8[1] = pop<U8>();
+	data.u8[2] = pop<U8>();
+	data.u8[3] = pop<U8>();
+	data.u8[4] = pop<U8>();
+	data.u8[5] = pop<U8>();
+	data.u8[6] = pop<U8>();
+	data.u8[7] = pop<U8>();
+	return data.u64;
+}
+
+template<>
+inline S64 CharStream::push(const S64 &value) {
+	return push<U64>(value);
+}
+template<>
+inline S64 CharStream::pop() {
+	return pop<U64>();
+}
+
+//-----------------------------------------------------------------------------
 // Strings
 
 template<>

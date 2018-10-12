@@ -145,10 +145,12 @@ int main(int argc, const char **argv) {
 							ns2.nonce_1 = ns1.nonce_1;
 							ns2.id_b = ns1.id_b;
 							ns2.session_key = std::bitset<10>(rand_u64());
+							ns2.timestamp = current_timestamp();
 
 							NS3 ns3;
 							ns3.session_key = ns2.session_key;
 							ns3.id_a = ns1.id_a;
+							ns3.timestamp = current_timestamp();
 
 							ns2.encrypt_ns3 = encrypt<NS3>(ns3, client_b.key);
 

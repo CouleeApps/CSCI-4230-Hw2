@@ -162,6 +162,10 @@ int ns_starter(sockaddr_in server_addr, int client_sock, std::bitset<10> key) {
 		printf("Nonce mismatch\n");
 		return 1;
 	}
+	if (!is_valid_timestamp(ns2.timestamp)) {
+		printf("Invalid timestamp on NS2, probable replay attack\n");
+		return 1;
+	}
 
 	std::bitset<10> session_key = ns2.session_key;
 	printf("Got session key: %d\n", static_cast<int>(session_key.to_ullong()));
@@ -249,6 +253,11 @@ int ns_receiver(int server_sock, std::bitset<10> key) {
 
 	encrypt_buf encrypt_ns3 = str.pop<encrypt_buf>();
 	NS3 ns3 = decrypt<NS3>(encrypt_ns3, key);
+	if (!is_valid_timestamp(ns3.timestamp)) {
+		printf("Invalid timestamp on NS3, probable replay attack\n");
+		return 1;
+	}
+
 	std::bitset<10> session_key = ns3.session_key;
 
 	printf("Got session key: %d\n", static_cast<int>(session_key.to_ullong()));

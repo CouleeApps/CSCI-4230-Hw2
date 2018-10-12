@@ -71,9 +71,14 @@ int get_client_sock(const char *bind_addr, short bind_port, int &sock, sockaddr_
 }
 
 int send_stream(int sock, const CharStream &str) {
-	if (send(sock, str.getBuffer().data(), str.size(), 0) < 0) {
+	ssize_t nsend = send(sock, str.getBuffer().data(), str.size(), 0);
+	if (nsend < 0) {
 		perror("send");
 		return -1;
+	}
+	if (nsend == 0) {
+		printf("Other side closed\n");
+		return 1;
 	}
 	return 0;
 }
@@ -85,6 +90,10 @@ int recv_stream(int sock, CharStream &str) {
 	if (nrecv < 0) {
 		perror("recv");
 		return -1;
+	}
+	if (nrecv == 0) {
+		printf("Other side closed\n");
+		return 1;
 	}
 
 	str = CharStream((U8 *)buffer, nrecv);

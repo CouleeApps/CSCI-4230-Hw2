@@ -23,12 +23,14 @@ struct NS2 {
 	std::bitset<10> session_key;
 	ID id_b;
 	uint8_t nonce_1;
+	uint64_t timestamp;
 	encrypt_buf encrypt_ns3;
 };
 
 struct NS3 {
 	std::bitset<10> session_key;
 	ID id_a;
+	uint64_t timestamp;
 };
 
 struct NS4 {
@@ -85,6 +87,7 @@ NS2 CharStream::push(const NS2 &value) {
 	push<10>(value.session_key);
 	push<ID>(value.id_b);
 	push<uint8_t>(value.nonce_1);
+	push<uint64_t>(value.timestamp);
 	push<encrypt_buf>(value.encrypt_ns3);
 	return value;
 }
@@ -95,6 +98,7 @@ NS2 CharStream::pop() {
 	value.session_key = pop<10>();
 	value.id_b = pop<ID>();
 	value.nonce_1 = pop<uint8_t>();
+	value.timestamp = pop<uint64_t>();
 	value.encrypt_ns3 = pop<encrypt_buf>();
 	return value;
 }
@@ -103,6 +107,7 @@ template<>
 NS3 CharStream::push(const NS3 &value) {
 	push<10>(value.session_key);
 	push<ID>(value.id_a);
+	push<uint64_t>(value.timestamp);
 	return value;
 }
 
@@ -111,6 +116,7 @@ NS3 CharStream::pop() {
 	NS3 value{};
 	value.session_key = pop<10>();
 	value.id_a = pop<ID>();
+	value.timestamp = pop<uint64_t>();
 	return value;
 }
 
